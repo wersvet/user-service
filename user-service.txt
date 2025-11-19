@@ -1,0 +1,23 @@
+❯ curl "http://localhost:8082/users/2" \
+        -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NjM3MjU4NjgsImlhdCI6MTc2MzQ2NjY2OCwidXNlcl9pZCI6MiwidXNlcm5hbWUiOiJ3ZXJzdmV0In0.FynOLoPYuoyZtDnbrX9IxhtbiL5wf6UFUhzUjF0kZOw"
+s
+
+
+
+Отправка заявки в друзья (A)
+curl -X POST "http://localhost:8082/friends/request" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NjM3MjE0OTcsImlhdCI6MTc2MzQ2MjI5NywidXNlcl9pZCI6MSwidXNlcm5hbWUiOiJheG5lbHdlZSJ9.KLJMOYiXDDeD1YX3C8y2sr-vmm4bVL2bdytpSviCX84" \
+  -H "Content-Type: application/json" \
+  -d '{"to_user_id": 2}'
+
+Проверка входящих заявок (B)
+curl "http://localhost:8082/friends/requests/incoming" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NjM3MjU4NjgsImlhdCI6MTc2MzQ2NjY2OCwidXNlcl9pZCI6MiwidXNlcm5hbWUiOiJ3ZXJzdmV0In0.FynOLoPYuoyZtDnbrX9IxhtbiL5wf6UFUhzUjF0kZOw"
+
+Принятие заявки (B)
+curl -X POST "http://localhost:8082/friends/requests/1/accept" \
+  -H "Authorization: Bearer <TOKEN_B>"
+
+Проверка списка друзей (A)
+  curl "http://localhost:8082/friends" \
+  -H "Authorization: Bearer <TOKEN_A>"
