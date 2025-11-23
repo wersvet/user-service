@@ -2,51 +2,28 @@ package services
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"time"
+
+	grpcsvc "user-service/internal/grpc"
 )
 
 type UserService struct {
-	client  *http.Client
-	baseURL string
+	authClient *grpcsvc.AuthClient
 }
 
 type UserDTO struct {
-	ID       int64  `json:"id"`
-	Username string `json:"username"`
+	ID        int64  `json:"id"`
+	Username  string `json:"username"`
+	CreatedAt string `json:"created_at,omitempty"`
 }
 
-func NewUserService(baseURL string) *UserService {
-	return &UserService{
-		client:  &http.Client{Timeout: 5 * time.Second},
-		baseURL: baseURL,
-	}
+func NewUserService(authClient *grpcsvc.AuthClient) *UserService {
+	return &UserService{authClient: authClient}
 }
 
 func (s *UserService) GetUserByID(ctx context.Context, id int64) (*UserDTO, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/auth/user/%d", s.baseURL, id), nil)
+	user, err := s.authClient.GetUser(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("user not found")
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("auth service returned status %d", resp.StatusCode)
-	}
-
-	var user UserDTO
-	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
-		return nil, err
-	}
-	return &user, nil
+	return &UserDTO{ID: user.Id, Username: user.Username, CreatedAt: user.CreatedAt}, nil
 }

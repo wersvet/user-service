@@ -1,0 +1,29 @@
+syntax = "proto3";
+package auth;
+
+option go_package = "user-service/proto/auth;authpb";
+
+service AuthInternal {
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+}
+
+message GetUserRequest {
+  int64 user_id = 1;
+}
+
+message GetUserResponse {
+  int64 id = 1;
+  string username = 2;
+  string created_at = 3;
+}
+
+message ValidateTokenRequest {
+  string token = 1;
+}
+
+message ValidateTokenResponse {
+  bool valid = 1;
+  int64 user_id = 2;
+  string username = 3;
+}

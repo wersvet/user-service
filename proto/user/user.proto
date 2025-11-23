@@ -1,0 +1,37 @@
+syntax = "proto3";
+package user;
+
+option go_package = "user-service/proto/user;userpb";
+
+service UserInternal {
+  rpc AreFriends(AreFriendsRequest) returns (AreFriendsResponse);
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  rpc BulkUsers(BulkUsersRequest) returns (BulkUsersResponse);
+}
+
+message AreFriendsRequest {
+  int64 user_id = 1;
+  int64 friend_id = 2;
+}
+
+message AreFriendsResponse {
+  bool are_friends = 1;
+}
+
+message GetUserRequest {
+  int64 user_id = 1;
+}
+
+message GetUserResponse {
+  int64 id = 1;
+  string username = 2;
+  string created_at = 3;
+}
+
+message BulkUsersRequest {
+  repeated int64 ids = 1;
+}
+
+message BulkUsersResponse {
+  repeated GetUserResponse users = 1;
+}
