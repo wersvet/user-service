@@ -2,7 +2,7 @@
 set -gx DB_DSN "postgres://user_service_user:password123@localhost:5432/user_service?sslmode=disable"
 
 # JWT secret (должен совпадать с auth-service!)
-set -gx JWT_SECRET "SUPERSECRETKEY123"
+set -gx JWT_SECRET "/2+XnmJGz1j3ehIVI/5P9kl+CghrE3DcS7rnT+qar5w"
 
 # auth service URL
 set -gx AUTH_SERVICE_URL "http://localhost:8081"
