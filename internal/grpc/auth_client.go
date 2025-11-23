@@ -12,20 +12,22 @@ import (
 
 type AuthClient struct {
 	conn   *grpc.ClientConn
-	client authpb.AuthInternalClient
+	client authpb.AuthServiceClient
 }
 
 func NewAuthClient(addr string) (*AuthClient, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("auth gRPC address is required")
 	}
+
 	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial auth gRPC: %w", err)
 	}
+
 	return &AuthClient{
 		conn:   conn,
-		client: authpb.NewAuthInternalClient(conn),
+		client: authpb.NewAuthServiceClient(conn),
 	}, nil
 }
 
