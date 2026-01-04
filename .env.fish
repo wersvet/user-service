@@ -9,3 +9,5 @@ set -gx AUTH_SERVICE_URL "http://localhost:8081"
 set -gx AUTH_GRPC_ADDR "localhost:8084"
 # port for this service
 set -gx PORT 8082
+
+set -gx AMQP_URL "amqp://guest:guest@localhost:5672/"

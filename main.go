@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	"user-service/internal/rabbitmq"
 
 	"github.com/gin-gonic/gin"
 
@@ -23,6 +24,7 @@ func main() {
 	dsn := os.Getenv("DB_DSN")
 	jwtSecret := os.Getenv("JWT_SECRET")
 	authGRPCAddr := os.Getenv("AUTH_GRPC_ADDR")
+	amqpURL := os.Getenv("AMQP_URL")
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -46,7 +48,20 @@ func main() {
 	}
 	defer authClient.Close()
 
-	friendRepo := repositories.NewFriendRepository(database)
+	publisher := rabbitmq.NewNoopPublisher()
+	if amqpURL == "" {
+		log.Printf("warning: AMQP_URL not set; event publishing disabled")
+	} else {
+		pub, err := rabbitmq.NewPublisher(amqpURL)
+		if err != nil {
+			log.Printf("warning: failed to initialize RabbitMQ publisher: %v", err)
+		} else {
+			publisher = pub
+		}
+	}
+	defer publisher.Close()
+
+	friendRepo := repositories.NewFriendRepository(database, publisher)
 	userService := services.NewUserService(authClient)
 
 	userHandler := handlers.NewUserHandler(userService, friendRepo)

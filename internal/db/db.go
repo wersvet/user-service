@@ -36,18 +36,18 @@ func Connect(dsn string) (*sqlx.DB, error) {
 func runMigrations(db *sqlx.DB) error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS friend_requests (
-		id SERIAL PRIMARY KEY,
-		from_user_id INT NOT NULL,
-		to_user_id INT NOT NULL,
-		status TEXT NOT NULL CHECK (status IN ('pending','accepted','rejected')),
-		created_at TIMESTAMPTZ DEFAULT NOW()
-		)`,
+			id SERIAL PRIMARY KEY,
+			from_user_id INT NOT NULL,
+			to_user_id INT NOT NULL,
+			status TEXT NOT NULL CHECK (status IN ('pending','accepted','rejected')),
+			created_at TIMESTAMPTZ DEFAULT NOW()
+			)`,
 		`CREATE TABLE IF NOT EXISTS friendships (
-		id SERIAL PRIMARY KEY,
-		user_id INT NOT NULL,
-		friend_id INT NOT NULL,
-		UNIQUE (user_id, friend_id)
-		)`,
+			id SERIAL PRIMARY KEY,
+			user_id INT NOT NULL,
+			friend_id INT NOT NULL,
+			UNIQUE (user_id, friend_id)
+			)`,
 	}
 
 	for _, q := range queries {

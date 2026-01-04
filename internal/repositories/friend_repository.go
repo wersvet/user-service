@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log"
+	"time"
+	"user-service/internal/rabbitmq"
 
 	"github.com/jmoiron/sqlx"
 
@@ -21,11 +24,12 @@ type FriendRepository interface {
 }
 
 type friendRepository struct {
-	db *sqlx.DB
+	db        *sqlx.DB
+	publisher rabbitmq.Publisher
 }
 
-func NewFriendRepository(db *sqlx.DB) FriendRepository {
-	return &friendRepository{db: db}
+func NewFriendRepository(db *sqlx.DB, publisher rabbitmq.Publisher) FriendRepository {
+	return &friendRepository{db: db, publisher: publisher}
 }
 
 func (r *friendRepository) CreateRequest(ctx context.Context, fromUserID, toUserID int64) (*models.FriendRequest, error) {
@@ -38,6 +42,14 @@ RETURNING id, from_user_id, to_user_id, status, created_at
 	if err != nil {
 		return nil, err
 	}
+
+	r.logPublish("friend.request.created", map[string]any{
+		"request_id":   req.ID,
+		"from_user_id": req.FromUserID,
+		"to_user_id":   req.ToUserID,
+		"created_at":   req.CreatedAt,
+	})
+
 	return &req, nil
 }
 
@@ -53,7 +65,8 @@ ORDER BY created_at DESC
 }
 
 func (r *friendRepository) AcceptRequest(ctx context.Context, requestID, userID int64) error {
-	return r.withTx(ctx, func(tx *sqlx.Tx) error {
+	var eventPayload map[string]any
+	err := r.withTx(ctx, func(tx *sqlx.Tx) error {
 		var req models.FriendRequest
 		if err := tx.GetContext(ctx, &req, `SELECT id, from_user_id, to_user_id, status, created_at FROM friend_requests WHERE id=$1`, requestID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -68,6 +81,8 @@ func (r *friendRepository) AcceptRequest(ctx context.Context, requestID, userID 
 			return nil
 		}
 
+		acceptedAt := time.Now().UTC()
+
 		if _, err := tx.ExecContext(ctx, `UPDATE friend_requests SET status='accepted' WHERE id=$1`, requestID); err != nil {
 			return err
 		}
@@ -78,8 +93,23 @@ func (r *friendRepository) AcceptRequest(ctx context.Context, requestID, userID 
 		if err := r.insertFriendship(ctx, tx, req.ToUserID, req.FromUserID); err != nil {
 			return err
 		}
+
+		eventPayload = map[string]any{
+			"user_id":     req.FromUserID,
+			"friend_id":   req.ToUserID,
+			"accepted_at": acceptedAt,
+		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	if eventPayload != nil {
+		r.logPublish("friendship.created", eventPayload)
+	}
+
+	return nil
 }
 
 func (r *friendRepository) RejectRequest(ctx context.Context, requestID, userID int64) error {
@@ -115,7 +145,7 @@ func (r *friendRepository) HasPendingRequest(ctx context.Context, fromUserID, to
 	var exists bool
 	err := r.db.GetContext(ctx, &exists, `
 SELECT EXISTS(
-SELECT 1 FROM friend_requests 
+SELECT 1 FROM friend_requests
 WHERE ((from_user_id=$1 AND to_user_id=$2) OR (from_user_id=$2 AND to_user_id=$1))
 AND status='pending'
 )
@@ -151,4 +181,13 @@ func (r *friendRepository) withTx(ctx context.Context, fn func(*sqlx.Tx) error) 
 		return err
 	}
 	return tx.Commit()
+}
+
+func (r *friendRepository) logPublish(eventType string, payload any) {
+	if r.publisher == nil {
+		return
+	}
+	if err := r.publisher.PublishEvent(eventType, payload); err != nil {
+		log.Printf("warning: failed to publish %s: %v", eventType, err)
+	}
 }
