@@ -2,25 +2,46 @@ package services
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
+	"user-service/internal/mocks"
 	authpb "user-service/proto/auth"
 )
 
-type fakeAuthClient struct{}
+func TestGetUserByIDSuccess(t *testing.T) {
+	t.Parallel()
 
-func (f *fakeAuthClient) GetUser(ctx context.Context, userID int64) (*authpb.GetUserResponse, error) {
-	return &authpb.GetUserResponse{Id: userID, Username: "test"}, nil
+	mockAuth := new(mocks.MockAuthClient)
+	userSvc := NewUserService(mockAuth)
+
+	expectedResp := &authpb.GetUserResponse{Id: 10, Username: "john", CreatedAt: "now"}
+	mockAuth.On("GetUser", mock.Anything, int64(10)).Return(expectedResp, nil).Once()
+
+	dto, err := userSvc.GetUserByID(context.Background(), 10)
+	require.NoError(t, err)
+	require.Equal(t, expectedResp.Id, dto.ID)
+	require.Equal(t, expectedResp.Username, dto.Username)
+	require.Equal(t, expectedResp.CreatedAt, dto.CreatedAt)
+
+	mockAuth.AssertExpectations(t)
 }
 
-func TestGetUserByID_Success(t *testing.T) {
-	svc := NewUserService(&fakeAuthClient{})
+func TestGetUserByIDAuthError(t *testing.T) {
+	t.Parallel()
 
-	user, err := svc.GetUserByID(context.Background(), 1)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if user == nil {
-		t.Fatalf("expected user, got nil")
-	}
+	mockAuth := new(mocks.MockAuthClient)
+	userSvc := NewUserService(mockAuth)
+
+	mockErr := errors.New("auth down")
+	mockAuth.On("GetUser", mock.Anything, int64(5)).Return((*authpb.GetUserResponse)(nil), mockErr).Once()
+
+	dto, err := userSvc.GetUserByID(context.Background(), 5)
+	require.Nil(t, dto)
+	require.ErrorIs(t, err, mockErr)
+
+	mockAuth.AssertExpectations(t)
 }
