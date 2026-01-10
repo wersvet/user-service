@@ -6,12 +6,13 @@ import (
 	"log"
 	"net"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"user-service/internal/repositories"
 	authpb "user-service/proto/auth"
 	userpb "user-service/proto/user"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // AuthClientAPI defines the auth service dependency used by the gRPC server.
