@@ -24,6 +24,11 @@ type publisher struct {
 
 // NewPublisher creates a RabbitMQ publisher and declares the app.events exchange.
 func NewPublisher(amqpURL string) (Publisher, error) {
+	return NewPublisherWithExchange(amqpURL, "app.events")
+}
+
+// NewPublisherWithExchange creates a RabbitMQ publisher and declares the provided exchange.
+func NewPublisherWithExchange(amqpURL, exchangeName string) (Publisher, error) {
 	conn, err := amqp.Dial(amqpURL)
 	if err != nil {
 		return nil, err
@@ -36,7 +41,7 @@ func NewPublisher(amqpURL string) (Publisher, error) {
 	}
 
 	if err := ch.ExchangeDeclare(
-		"app.events",
+		exchangeName,
 		"topic",
 		true,  // durable
 		false, // auto-deleted
@@ -49,7 +54,7 @@ func NewPublisher(amqpURL string) (Publisher, error) {
 		return nil, err
 	}
 
-	return &publisher{conn: conn, channel: ch, exchangeName: "app.events"}, nil
+	return &publisher{conn: conn, channel: ch, exchangeName: exchangeName}, nil
 }
 
 // NewNoopPublisher returns a publisher that drops events but logs that RabbitMQ is unavailable.

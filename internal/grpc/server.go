@@ -6,30 +6,40 @@ import (
 	"log"
 	"net"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"user-service/internal/repositories"
+	authpb "user-service/proto/auth"
 	userpb "user-service/proto/user"
 )
+
+// AuthClientAPI defines the auth service dependency used by the gRPC server.
+type AuthClientAPI interface {
+	GetUser(ctx context.Context, userID int64) (*authpb.GetUserResponse, error)
+}
 
 type UserGRPCServer struct {
 	userpb.UnimplementedUserInternalServer
 	friends    repositories.FriendRepository
-	authClient *AuthClient
+	authClient AuthClientAPI
 }
 
-func NewUserGRPCServer(friends repositories.FriendRepository, authClient *AuthClient) *UserGRPCServer {
+func NewUserGRPCServer(friends repositories.FriendRepository, authClient AuthClientAPI) *UserGRPCServer {
 	return &UserGRPCServer{friends: friends, authClient: authClient}
 }
 
-func StartGRPCServer(ctx context.Context, addr string, friends repositories.FriendRepository, authClient *AuthClient) (*grpc.Server, error) {
+func StartGRPCServer(ctx context.Context, addr string, friends repositories.FriendRepository, authClient AuthClientAPI) (*grpc.Server, error) {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
 
-	srv := grpc.NewServer()
+	srv := grpc.NewServer(
+		grpc.UnaryInterceptor(otelgrpc.UnaryServerInterceptor()),
+		grpc.StreamInterceptor(otelgrpc.StreamServerInterceptor()),
+	)
 	userpb.RegisterUserInternalServer(srv, NewUserGRPCServer(friends, authClient))
 
 	go func() {

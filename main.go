@@ -11,11 +11,15 @@ import (
 	"user-service/internal/rabbitmq"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 
 	"user-service/internal/db"
 	grpcsvc "user-service/internal/grpc"
 	"user-service/internal/handlers"
 	"user-service/internal/middleware"
+	"user-service/internal/observability"
 	"user-service/internal/repositories"
 	"user-service/internal/services"
 )
@@ -25,9 +29,13 @@ func main() {
 	jwtSecret := os.Getenv("JWT_SECRET")
 	authGRPCAddr := os.Getenv("AUTH_GRPC_ADDR")
 	amqpURL := os.Getenv("AMQP_URL")
+	amqpExchange := os.Getenv("AMQP_EXCHANGE")
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
+	}
+	if amqpExchange == "" {
+		amqpExchange = "app.logs"
 	}
 
 	if dsn == "" || jwtSecret == "" || authGRPCAddr == "" {
@@ -36,6 +44,19 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	tracingShutdown, err := observability.InitTracing(ctx, "user-service")
+	if err != nil {
+		log.Printf("warning: failed to initialize tracing: %v", err)
+	} else {
+		defer func() {
+			if err := tracingShutdown(context.Background()); err != nil {
+				log.Printf("warning: tracing shutdown failed: %v", err)
+			}
+		}()
+	}
+
+	observability.InitMetrics(prometheus.DefaultRegisterer)
 
 	database, err := db.Connect(dsn)
 	if err != nil {
@@ -52,7 +73,7 @@ func main() {
 	if amqpURL == "" {
 		log.Printf("warning: AMQP_URL not set; event publishing disabled")
 	} else {
-		pub, err := rabbitmq.NewPublisher(amqpURL)
+		pub, err := rabbitmq.NewPublisherWithExchange(amqpURL, amqpExchange)
 		if err != nil {
 			log.Printf("warning: failed to initialize RabbitMQ publisher: %v", err)
 		} else {
@@ -65,16 +86,19 @@ func main() {
 	userService := services.NewUserService(authClient)
 
 	userHandler := handlers.NewUserHandler(userService, friendRepo)
-	friendHandler := handlers.NewFriendHandler(friendRepo, userService)
+	friendHandler := handlers.NewFriendHandler(friendRepo, userService, publisher)
 
 	if _, err := grpcsvc.StartGRPCServer(ctx, ":8085", friendRepo, authClient); err != nil {
 		log.Fatalf("failed to start gRPC server: %v", err)
 	}
 
-	r := gin.Default()
+	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
+	r.Use(otelgin.Middleware("user-service"))
+	r.Use(middleware.Metrics())
 
 	r.GET("/users/:id", userHandler.GetUserByID)
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	auth := r.Group("", middleware.JWTAuth(jwtSecret))
 	auth.GET("/users/me", userHandler.GetMe)
