@@ -3,11 +3,16 @@ package services
 import (
 	"context"
 
-	grpcsvc "user-service/internal/grpc"
+	authpb "user-service/proto/auth"
 )
 
+// AuthClient describes the subset of the auth gRPC client used by the service.
+type AuthClient interface {
+	GetUser(ctx context.Context, userID int64) (*authpb.GetUserResponse, error)
+}
+
 type UserService struct {
-	authClient *grpcsvc.AuthClient
+	authClient AuthClient
 }
 
 type UserDTO struct {
@@ -16,7 +21,7 @@ type UserDTO struct {
 	CreatedAt string `json:"created_at,omitempty"`
 }
 
-func NewUserService(authClient *grpcsvc.AuthClient) *UserService {
+func NewUserService(authClient AuthClient) *UserService {
 	return &UserService{authClient: authClient}
 }
 
