@@ -11,3 +11,6 @@ set -gx AUTH_GRPC_ADDR "localhost:8084"
 set -gx PORT 8082
 
 set -gx AMQP_URL "amqp://guest:guest@localhost:5672/"
+set -gx LOGS_EXCHANGE "logs.events"
+set -gx SERVICE_NAME "user-service"
+set -gx ENVIRONMENT "local"

@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 	"user-service/internal/rabbitmq"
+	"user-service/internal/telemetry"
 
 	"github.com/gin-gonic/gin"
 
@@ -25,6 +26,9 @@ func main() {
 	jwtSecret := os.Getenv("JWT_SECRET")
 	authGRPCAddr := os.Getenv("AUTH_GRPC_ADDR")
 	amqpURL := os.Getenv("AMQP_URL")
+	logsExchange := os.Getenv("LOGS_EXCHANGE")
+	serviceName := os.Getenv("SERVICE_NAME")
+	environment := os.Getenv("ENVIRONMENT")
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -61,11 +65,27 @@ func main() {
 	}
 	defer publisher.Close()
 
+	telemetryPublisher := telemetry.NewNoopPublisher()
+	telemetryConfig := telemetry.Config{Environment: environment, ServiceName: serviceName}
+	if amqpURL == "" {
+		log.Printf("warning: AMQP_URL not set; audit events disabled")
+	} else if logsExchange == "" || serviceName == "" || environment == "" {
+		log.Printf("warning: LOGS_EXCHANGE, SERVICE_NAME, and ENVIRONMENT must be set; audit events disabled")
+	} else {
+		auditPublisher := telemetry.NewRabbitPublisher(amqpURL, logsExchange)
+		if err := auditPublisher.Connect(); err != nil {
+			log.Printf("warning: failed to initialize telemetry publisher: %v", err)
+		} else {
+			telemetryPublisher = auditPublisher
+		}
+	}
+	defer telemetryPublisher.Close()
+
 	friendRepo := repositories.NewFriendRepository(database, publisher)
 	userService := services.NewUserService(authClient)
 
 	userHandler := handlers.NewUserHandler(userService, friendRepo)
-	friendHandler := handlers.NewFriendHandler(friendRepo, userService)
+	friendHandler := handlers.NewFriendHandler(friendRepo, userService, telemetryPublisher, telemetryConfig)
 
 	if _, err := grpcsvc.StartGRPCServer(ctx, ":8085", friendRepo, authClient); err != nil {
 		log.Fatalf("failed to start gRPC server: %v", err)
