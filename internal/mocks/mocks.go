@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"user-service/internal/models"
+	"user-service/internal/rabbitmq"
 	authpb "user-service/proto/auth"
 )
 
@@ -100,6 +101,23 @@ var _ interface {
 	HasPendingRequest(context.Context, int64, int64) (bool, error)
 	AreFriends(context.Context, int64, int64) (bool, error)
 } = (*MockFriendRepository)(nil)
+
+// MockPublisher mocks RabbitMQ publisher behavior for telemetry.
+type MockPublisher struct {
+	mock.Mock
+}
+
+func (m *MockPublisher) Publish(ctx context.Context, routingKey string, event any) error {
+	args := m.Called(ctx, routingKey, event)
+	return args.Error(0)
+}
+
+func (m *MockPublisher) Close() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+var _ rabbitmq.Publisher = (*MockPublisher)(nil)
 
 // Additional compile-time assertion against sql.ErrNoRows usages.
 var _ = sql.ErrNoRows

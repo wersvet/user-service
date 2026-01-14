@@ -13,6 +13,8 @@ import (
 	"user-service/internal/models"
 )
 
+var ErrRequestForbidden = errors.New("friend request not allowed")
+
 type FriendRepository interface {
 	CreateRequest(ctx context.Context, fromUserID, toUserID int64) (*models.FriendRequest, error)
 	GetIncomingRequests(ctx context.Context, userID int64) ([]models.FriendRequest, error)
@@ -43,7 +45,7 @@ RETURNING id, from_user_id, to_user_id, status, created_at
 		return nil, err
 	}
 
-	r.logPublish("friend.request.created", map[string]any{
+	r.logPublish(ctx, "friend.request.created", map[string]any{
 		"request_id":   req.ID,
 		"from_user_id": req.FromUserID,
 		"to_user_id":   req.ToUserID,
@@ -75,7 +77,7 @@ func (r *friendRepository) AcceptRequest(ctx context.Context, requestID, userID 
 			return err
 		}
 		if req.ToUserID != userID {
-			return sql.ErrNoRows
+			return ErrRequestForbidden
 		}
 		if req.Status != "pending" {
 			return nil
@@ -106,13 +108,23 @@ func (r *friendRepository) AcceptRequest(ctx context.Context, requestID, userID 
 	}
 
 	if eventPayload != nil {
-		r.logPublish("friendship.created", eventPayload)
+		r.logPublish(ctx, "friendship.created", eventPayload)
 	}
 
 	return nil
 }
 
 func (r *friendRepository) RejectRequest(ctx context.Context, requestID, userID int64) error {
+	var toUserID int64
+	if err := r.db.GetContext(ctx, &toUserID, `SELECT to_user_id FROM friend_requests WHERE id=$1`, requestID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return sql.ErrNoRows
+		}
+		return err
+	}
+	if toUserID != userID {
+		return ErrRequestForbidden
+	}
 	res, err := r.db.ExecContext(ctx, `
 UPDATE friend_requests SET status='rejected'
 WHERE id=$1 AND to_user_id=$2 AND status='pending'
@@ -183,11 +195,11 @@ func (r *friendRepository) withTx(ctx context.Context, fn func(*sqlx.Tx) error) 
 	return tx.Commit()
 }
 
-func (r *friendRepository) logPublish(eventType string, payload any) {
+func (r *friendRepository) logPublish(ctx context.Context, eventType string, payload any) {
 	if r.publisher == nil {
 		return
 	}
-	if err := r.publisher.PublishEvent(eventType, payload); err != nil {
+	if err := r.publisher.Publish(ctx, eventType, payload); err != nil {
 		log.Printf("warning: failed to publish %s: %v", eventType, err)
 	}
 }

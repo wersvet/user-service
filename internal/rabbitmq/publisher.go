@@ -11,7 +11,7 @@ import (
 )
 
 type Publisher interface {
-	PublishEvent(eventType string, payload any) error
+	Publish(ctx context.Context, routingKey string, event any) error
 	Close() error
 }
 
@@ -22,8 +22,8 @@ type publisher struct {
 	mu           sync.Mutex
 }
 
-// NewPublisher creates a RabbitMQ publisher and declares the app.events exchange.
-func NewPublisher(amqpURL string) (Publisher, error) {
+// NewPublisher creates a RabbitMQ publisher and declares the provided exchange.
+func NewPublisher(amqpURL, exchangeName string) (Publisher, error) {
 	conn, err := amqp.Dial(amqpURL)
 	if err != nil {
 		return nil, err
@@ -36,7 +36,7 @@ func NewPublisher(amqpURL string) (Publisher, error) {
 	}
 
 	if err := ch.ExchangeDeclare(
-		"app.events",
+		exchangeName,
 		"topic",
 		true,  // durable
 		false, // auto-deleted
@@ -49,7 +49,7 @@ func NewPublisher(amqpURL string) (Publisher, error) {
 		return nil, err
 	}
 
-	return &publisher{conn: conn, channel: ch, exchangeName: "app.events"}, nil
+	return &publisher{conn: conn, channel: ch, exchangeName: exchangeName}, nil
 }
 
 // NewNoopPublisher returns a publisher that drops events but logs that RabbitMQ is unavailable.
@@ -57,14 +57,14 @@ type noopPublisher struct{}
 
 func NewNoopPublisher() Publisher { return &noopPublisher{} }
 
-func (n *noopPublisher) PublishEvent(eventType string, payload any) error {
-	log.Printf("warning: RabbitMQ not configured; skipping publish for event %s", eventType)
+func (n *noopPublisher) Publish(ctx context.Context, routingKey string, event any) error {
+	log.Printf("warning: RabbitMQ not configured; skipping publish for routing key %s", routingKey)
 	return nil
 }
 
 func (n *noopPublisher) Close() error { return nil }
 
-func (p *publisher) PublishEvent(eventType string, payload any) error {
+func (p *publisher) Publish(ctx context.Context, routingKey string, event any) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -72,17 +72,20 @@ func (p *publisher) PublishEvent(eventType string, payload any) error {
 		return amqp.ErrClosed
 	}
 
-	body, err := json.Marshal(payload)
+	body, err := json.Marshal(event)
 	if err != nil {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	return p.channel.PublishWithContext(ctx,
 		p.exchangeName,
-		eventType,
+		routingKey,
 		false, // mandatory
 		false, // immediate
 		amqp.Publishing{
