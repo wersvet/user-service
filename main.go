@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 	"user-service/internal/rabbitmq"
+	"user-service/internal/telemetry"
 
 	"github.com/gin-gonic/gin"
 
@@ -24,7 +25,10 @@ func main() {
 	dsn := os.Getenv("DB_DSN")
 	jwtSecret := os.Getenv("JWT_SECRET")
 	authGRPCAddr := os.Getenv("AUTH_GRPC_ADDR")
-	amqpURL := os.Getenv("AMQP_URL")
+	amqpURL := getEnv("AMQP_URL", "amqp://guest:guest@localhost:5672/")
+	logsExchange := getEnv("LOGS_EXCHANGE", "logs.events")
+	serviceName := getEnv("SERVICE_NAME", "user-service")
+	environment := getEnv("ENVIRONMENT", "local")
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -52,7 +56,7 @@ func main() {
 	if amqpURL == "" {
 		log.Printf("warning: AMQP_URL not set; event publishing disabled")
 	} else {
-		pub, err := rabbitmq.NewPublisher(amqpURL)
+		pub, err := rabbitmq.NewPublisher(amqpURL, "app.events")
 		if err != nil {
 			log.Printf("warning: failed to initialize RabbitMQ publisher: %v", err)
 		} else {
@@ -61,11 +65,25 @@ func main() {
 	}
 	defer publisher.Close()
 
+	auditPublisher := rabbitmq.NewNoopPublisher()
+	if amqpURL == "" {
+		log.Printf("warning: AMQP_URL not set; audit publishing disabled")
+	} else {
+		pub, err := rabbitmq.NewPublisher(amqpURL, logsExchange)
+		if err != nil {
+			log.Printf("warning: failed to initialize RabbitMQ audit publisher: %v", err)
+		} else {
+			auditPublisher = pub
+		}
+	}
+	defer auditPublisher.Close()
+
 	friendRepo := repositories.NewFriendRepository(database, publisher)
 	userService := services.NewUserService(authClient)
 
+	auditEmitter := telemetry.NewAuditEmitter(auditPublisher, serviceName, environment)
 	userHandler := handlers.NewUserHandler(userService, friendRepo)
-	friendHandler := handlers.NewFriendHandler(friendRepo, userService)
+	friendHandler := handlers.NewFriendHandler(friendRepo, userService, auditEmitter)
 
 	if _, err := grpcsvc.StartGRPCServer(ctx, ":8085", friendRepo, authClient); err != nil {
 		log.Fatalf("failed to start gRPC server: %v", err)
@@ -102,4 +120,12 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("HTTP server shutdown error: %v", err)
 	}
+}
+
+func getEnv(key, fallback string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	return value
 }
