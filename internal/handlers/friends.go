@@ -10,15 +10,17 @@ import (
 
 	"user-service/internal/repositories"
 	"user-service/internal/services"
+	"user-service/internal/telemetry"
 )
 
 type FriendHandler struct {
 	friends repositories.FriendRepository
 	users   *services.UserService
+	audit   *telemetry.AuditEmitter
 }
 
-func NewFriendHandler(friends repositories.FriendRepository, users *services.UserService) *FriendHandler {
-	return &FriendHandler{friends: friends, users: users}
+func NewFriendHandler(friends repositories.FriendRepository, users *services.UserService, audit *telemetry.AuditEmitter) *FriendHandler {
+	return &FriendHandler{friends: friends, users: users, audit: audit}
 }
 
 type sendRequestBody struct {
@@ -26,14 +28,21 @@ type sendRequestBody struct {
 }
 
 func (h *FriendHandler) SendRequest(c *gin.Context) {
+	requestID := requestIDFromHeader(c)
+	userID := userIDFromContext(c)
 	var body sendRequestBody
 	if err := c.ShouldBindJSON(&body); err != nil {
+		h.emitAudit(c.Request.Context(), "ERROR", "invalid request payload", requestID, userID)
 		c.JSON(nethttp.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
 
-	userIDVal, _ := c.Get("userID")
-	fromUserID := userIDVal.(int64)
+	if userID == nil {
+		h.emitAudit(c.Request.Context(), "ERROR", "internal error", requestID, nil)
+		c.JSON(nethttp.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	fromUserID := *userID
 
 	toUserID := body.ToUserID
 	if toUserID == fromUserID {
@@ -43,36 +52,43 @@ func (h *FriendHandler) SendRequest(c *gin.Context) {
 
 	ctx := c.Request.Context()
 	if _, err := h.users.GetUserByID(ctx, toUserID); err != nil {
-		c.JSON(nethttp.StatusBadGateway, gin.H{"error": "target user not found"})
+		h.emitAudit(ctx, "ERROR", "target user not found", requestID, userID)
+		c.JSON(nethttp.StatusNotFound, gin.H{"error": "target user not found"})
 		return
 	}
 
 	exists, err := h.friends.HasPendingRequest(ctx, fromUserID, toUserID)
 	if err != nil {
+		h.emitAudit(ctx, "ERROR", "internal error", requestID, userID)
 		c.JSON(nethttp.StatusInternalServerError, gin.H{"error": "failed to check requests"})
 		return
 	}
 	if exists {
-		c.JSON(nethttp.StatusBadRequest, gin.H{"error": "pending friend request already exists"})
+		h.emitAudit(ctx, "ERROR", "pending friend request already exists", requestID, userID)
+		c.JSON(nethttp.StatusConflict, gin.H{"error": "pending friend request already exists"})
 		return
 	}
 
 	friends, err := h.friends.AreFriends(ctx, fromUserID, toUserID)
 	if err != nil {
+		h.emitAudit(ctx, "ERROR", "internal error", requestID, userID)
 		c.JSON(nethttp.StatusInternalServerError, gin.H{"error": "failed to check friendship"})
 		return
 	}
 	if friends {
-		c.JSON(nethttp.StatusBadRequest, gin.H{"error": "users are already friends"})
+		h.emitAudit(ctx, "ERROR", "users are already friends", requestID, userID)
+		c.JSON(nethttp.StatusConflict, gin.H{"error": "users are already friends"})
 		return
 	}
 
 	req, err := h.friends.CreateRequest(ctx, fromUserID, toUserID)
 	if err != nil {
+		h.emitAudit(ctx, "ERROR", "internal error", requestID, userID)
 		c.JSON(nethttp.StatusInternalServerError, gin.H{"error": "failed to create request"})
 		return
 	}
 
+	h.emitAudit(ctx, "INFO", "Friend request sent to '"+strconv.FormatInt(toUserID, 10)+"'", requestID, userID)
 	c.JSON(nethttp.StatusCreated, req)
 }
 
@@ -106,14 +122,14 @@ func (h *FriendHandler) ListIncoming(c *gin.Context) {
 }
 
 func (h *FriendHandler) AcceptRequest(c *gin.Context) {
-	h.handleDecision(c, h.friends.AcceptRequest, "accepted")
+	h.handleDecision(c, h.friends.AcceptRequest, "accepted", "accept")
 }
 
 func (h *FriendHandler) RejectRequest(c *gin.Context) {
-	h.handleDecision(c, h.friends.RejectRequest, "rejected")
+	h.handleDecision(c, h.friends.RejectRequest, "rejected", "reject")
 }
 
-func (h *FriendHandler) handleDecision(c *gin.Context, action func(ctx context.Context, requestID, userID int64) error, status string) {
+func (h *FriendHandler) handleDecision(c *gin.Context, action func(ctx context.Context, requestID, userID int64) error, status, verb string) {
 	idStr := c.Param("id")
 	reqID, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
@@ -121,19 +137,33 @@ func (h *FriendHandler) handleDecision(c *gin.Context, action func(ctx context.C
 		return
 	}
 
-	userIDVal, _ := c.Get("userID")
-	userID := userIDVal.(int64)
+	requestID := requestIDFromHeader(c)
+	userID := userIDFromContext(c)
+	if userID == nil {
+		h.emitAudit(c.Request.Context(), "ERROR", "internal error", requestID, nil)
+		c.JSON(nethttp.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	userIDVal := *userID
 
 	ctx := c.Request.Context()
-	if err := action(ctx, reqID, userID); err != nil {
+	if err := action(ctx, reqID, userIDVal); err != nil {
 		if err == sql.ErrNoRows {
+			h.emitAudit(ctx, "ERROR", "friend request not found", requestID, userID)
 			c.JSON(nethttp.StatusNotFound, gin.H{"error": "request not found"})
 			return
 		}
+		if err == repositories.ErrRequestForbidden {
+			h.emitAudit(ctx, "ERROR", "not allowed to "+verb+" this request", requestID, userID)
+			c.JSON(nethttp.StatusForbidden, gin.H{"error": "not allowed to " + verb + " this request"})
+			return
+		}
+		h.emitAudit(ctx, "ERROR", "internal error", requestID, userID)
 		c.JSON(nethttp.StatusInternalServerError, gin.H{"error": "failed to update request"})
 		return
 	}
 
+	h.emitAudit(ctx, "INFO", "Friend request "+status, requestID, userID)
 	c.JSON(nethttp.StatusOK, gin.H{"status": status})
 }
 
@@ -158,4 +188,11 @@ func (h *FriendHandler) ListFriends(c *gin.Context) {
 	}
 
 	c.JSON(nethttp.StatusOK, resp)
+}
+
+func (h *FriendHandler) emitAudit(ctx context.Context, level, text, requestID string, userID *int64) {
+	if h.audit == nil {
+		return
+	}
+	h.audit.EmitAudit(ctx, level, text, requestID, userID)
 }
