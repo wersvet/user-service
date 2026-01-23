@@ -11,14 +11,16 @@ import (
 	"user-service/internal/rabbitmq"
 	"user-service/internal/telemetry"
 
-	"github.com/gin-gonic/gin"
-
 	"user-service/internal/db"
 	grpcsvc "user-service/internal/grpc"
 	"user-service/internal/handlers"
+	"user-service/internal/metrics"
 	"user-service/internal/middleware"
 	"user-service/internal/repositories"
 	"user-service/internal/services"
+
+	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -91,7 +93,10 @@ func main() {
 
 	r := gin.Default()
 	r.Use(gin.Logger(), gin.Recovery())
+	r.Use(middleware.Metrics(serviceName))
+	metrics.RegisterFriendMetrics()
 
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	r.GET("/users/:id", userHandler.GetUserByID)
 
 	auth := r.Group("", middleware.JWTAuth(jwtSecret))

@@ -10,6 +10,10 @@ import (
 
 func JWTAuth(secret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if c.FullPath() == "/metrics" || c.Request.URL.Path == "/metrics" {
+			c.Next()
+			return
+		}
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" || !strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing or invalid authorization header"})
