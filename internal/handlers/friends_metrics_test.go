@@ -65,7 +65,7 @@ func assertMetricIncrement(t *testing.T, router *gin.Engine, name, status string
 
 func TestFriendRequestMetricsFailed(t *testing.T) {
 	metrics.RegisterFriendMetrics()
-	handler := NewFriendHandler(new(mocks.MockFriendRepository), services.NewUserService(new(mocks.MockAuthClient)), nil)
+	handler := NewFriendHandler(new(mocks.MockFriendRepository), services.NewUserService(new(mocks.MockUserRepository)), nil)
 	router := setupFriendsMetricsRouter(handler)
 
 	assertMetricIncrement(t, router, "friend_requests_total", "failed", func() {
@@ -78,7 +78,7 @@ func TestFriendRequestMetricsFailed(t *testing.T) {
 
 func TestFriendAcceptMetricsFailed(t *testing.T) {
 	metrics.RegisterFriendMetrics()
-	handler := NewFriendHandler(new(mocks.MockFriendRepository), services.NewUserService(new(mocks.MockAuthClient)), nil)
+	handler := NewFriendHandler(new(mocks.MockFriendRepository), services.NewUserService(new(mocks.MockUserRepository)), nil)
 	router := setupFriendsMetricsRouter(handler)
 
 	assertMetricIncrement(t, router, "friend_accepts_total", "failed", func() {
@@ -91,7 +91,7 @@ func TestFriendAcceptMetricsFailed(t *testing.T) {
 
 func TestFriendRejectMetricsFailed(t *testing.T) {
 	metrics.RegisterFriendMetrics()
-	handler := NewFriendHandler(new(mocks.MockFriendRepository), services.NewUserService(new(mocks.MockAuthClient)), nil)
+	handler := NewFriendHandler(new(mocks.MockFriendRepository), services.NewUserService(new(mocks.MockUserRepository)), nil)
 	router := setupFriendsMetricsRouter(handler)
 
 	assertMetricIncrement(t, router, "friend_rejects_total", "failed", func() {

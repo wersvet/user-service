@@ -23,6 +23,7 @@ type FriendRepository interface {
 	ListFriends(ctx context.Context, userID int64) ([]int64, error)
 	HasPendingRequest(ctx context.Context, fromUserID, toUserID int64) (bool, error)
 	AreFriends(ctx context.Context, userID, otherID int64) (bool, error)
+	DeleteFriendship(ctx context.Context, userID, friendID int64) error
 }
 
 type friendRepository struct {
@@ -173,6 +174,14 @@ SELECT 1 FROM friendships WHERE user_id=$1 AND friend_id=$2
 )
 `, userID, otherID)
 	return exists, err
+}
+
+func (r *friendRepository) DeleteFriendship(ctx context.Context, userID, friendID int64) error {
+	_, err := r.db.ExecContext(ctx, `
+DELETE FROM friendships
+WHERE (user_id=$1 AND friend_id=$2) OR (user_id=$2 AND friend_id=$1)
+`, userID, friendID)
+	return err
 }
 
 func (r *friendRepository) insertFriendship(ctx context.Context, tx *sqlx.Tx, userID, friendID int64) error {

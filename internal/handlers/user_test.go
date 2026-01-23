@@ -3,8 +3,13 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -15,7 +20,6 @@ import (
 	"user-service/internal/mocks"
 	"user-service/internal/models"
 	"user-service/internal/services"
-	authpb "user-service/proto/auth"
 )
 
 func setupUserRouter(userHandler *UserHandler) *gin.Engine {
@@ -27,17 +31,19 @@ func setupUserRouter(userHandler *UserHandler) *gin.Engine {
 	})
 	r.GET("/users/:id", userHandler.GetUserByID)
 	r.GET("/users/me", userHandler.GetMe)
+	r.POST("/users/me/avatar", userHandler.UploadAvatar)
+	r.DELETE("/users/me/avatar", userHandler.DeleteAvatar)
 	return r
 }
 
 func TestGetUserByIDOK(t *testing.T) {
-	mockAuth := new(mocks.MockAuthClient)
-	userSvc := services.NewUserService(mockAuth)
+	mockUsers := new(mocks.MockUserRepository)
+	userSvc := services.NewUserService(mockUsers)
 	friendRepo := new(mocks.MockFriendRepository)
-	handler := NewUserHandler(userSvc, friendRepo)
+	handler := NewUserHandler(userSvc, friendRepo, mockUsers, t.TempDir())
 	router := setupUserRouter(handler)
 
-	mockAuth.On("GetUser", mock.Anything, int64(42)).Return(&authpb.GetUserResponse{Id: 42, Username: "alice"}, nil).Once()
+	mockUsers.On("GetByID", mock.Anything, int64(42)).Return(&models.User{ID: 42, Username: "alice", AvatarURL: "/uploads/avatars/42/avatar.png"}, nil).Once()
 
 	req := httptest.NewRequest(http.MethodGet, "/users/42", nil)
 	rec := httptest.NewRecorder()
@@ -48,13 +54,15 @@ func TestGetUserByIDOK(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	require.Equal(t, int64(42), resp.ID)
 	require.Equal(t, "alice", resp.Username)
+	require.Equal(t, "/uploads/avatars/42/avatar.png", resp.AvatarURL)
 
-	mockAuth.AssertExpectations(t)
+	mockUsers.AssertExpectations(t)
 }
 
 func TestGetUserByIDInvalidID(t *testing.T) {
-	userSvc := services.NewUserService(new(mocks.MockAuthClient))
-	handler := NewUserHandler(userSvc, new(mocks.MockFriendRepository))
+	mockUsers := new(mocks.MockUserRepository)
+	userSvc := services.NewUserService(mockUsers)
+	handler := NewUserHandler(userSvc, new(mocks.MockFriendRepository), mockUsers, t.TempDir())
 	router := setupUserRouter(handler)
 
 	req := httptest.NewRequest(http.MethodGet, "/users/abc", nil)
@@ -65,17 +73,17 @@ func TestGetUserByIDInvalidID(t *testing.T) {
 }
 
 func TestGetMeSuccess(t *testing.T) {
-	mockAuth := new(mocks.MockAuthClient)
 	mockFriends := new(mocks.MockFriendRepository)
-	userSvc := services.NewUserService(mockAuth)
-	handler := NewUserHandler(userSvc, mockFriends)
+	mockUsers := new(mocks.MockUserRepository)
+	userSvc := services.NewUserService(mockUsers)
+	handler := NewUserHandler(userSvc, mockFriends, mockUsers, t.TempDir())
 	router := setupUserRouter(handler)
 
-	mockAuth.On("GetUser", mock.Anything, int64(1)).Return(&authpb.GetUserResponse{Id: 1, Username: "me"}, nil).Once()
+	mockUsers.On("GetByID", mock.Anything, int64(1)).Return(&models.User{ID: 1, Username: "me"}, nil).Once()
 	mockFriends.On("ListFriends", mock.Anything, int64(1)).Return([]int64{2}, nil).Once()
 	mockFriends.On("GetIncomingRequests", mock.Anything, int64(1)).Return([]models.FriendRequest{{ID: 7, FromUserID: 3}}, nil).Once()
-	mockAuth.On("GetUser", mock.Anything, int64(2)).Return(&authpb.GetUserResponse{Id: 2, Username: "wersvet"}, nil).Once()
-	mockAuth.On("GetUser", mock.Anything, int64(3)).Return(&authpb.GetUserResponse{Id: 3, Username: "alimzhan"}, nil).Once()
+	mockUsers.On("GetByID", mock.Anything, int64(2)).Return(&models.User{ID: 2, Username: "wersvet"}, nil).Once()
+	mockUsers.On("GetByID", mock.Anything, int64(3)).Return(&models.User{ID: 3, Username: "alimzhan"}, nil).Once()
 
 	req := httptest.NewRequest(http.MethodGet, "/users/me", nil)
 	rec := httptest.NewRecorder()
@@ -98,39 +106,123 @@ func TestGetMeSuccess(t *testing.T) {
 	require.Equal(t, float64(7), incomingEntry["id"])
 	require.Equal(t, "alimzhan", incomingEntry["from_username"])
 
-	mockAuth.AssertExpectations(t)
 	mockFriends.AssertExpectations(t)
+	mockUsers.AssertExpectations(t)
+}
+
+func TestUserHandlersDoNotCallAuthClient(t *testing.T) {
+	mockAuth := new(mocks.MockAuthClient)
+	mockFriends := new(mocks.MockFriendRepository)
+	mockUsers := new(mocks.MockUserRepository)
+	userSvc := services.NewUserService(mockUsers)
+	handler := NewUserHandler(userSvc, mockFriends, mockUsers, t.TempDir())
+	router := setupUserRouter(handler)
+
+	mockUsers.On("GetByID", mock.Anything, int64(1)).Return(&models.User{ID: 1, Username: "me"}, nil).Twice()
+	mockFriends.On("ListFriends", mock.Anything, int64(1)).Return([]int64{}, nil).Once()
+	mockFriends.On("GetIncomingRequests", mock.Anything, int64(1)).Return([]models.FriendRequest{}, nil).Once()
+
+	req := httptest.NewRequest(http.MethodGet, "/users/1", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	req = httptest.NewRequest(http.MethodGet, "/users/me", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	mockAuth.AssertNotCalled(t, "GetUser", mock.Anything, mock.Anything)
+	mockFriends.AssertExpectations(t)
+	mockUsers.AssertExpectations(t)
 }
 
 func TestGetMeDependencyError(t *testing.T) {
-	mockAuth := new(mocks.MockAuthClient)
 	mockFriends := new(mocks.MockFriendRepository)
-	userSvc := services.NewUserService(mockAuth)
-	handler := NewUserHandler(userSvc, mockFriends)
+	mockUsers := new(mocks.MockUserRepository)
+	userSvc := services.NewUserService(mockUsers)
+	handler := NewUserHandler(userSvc, mockFriends, mockUsers, t.TempDir())
 	router := setupUserRouter(handler)
 
-	mockAuth.On("GetUser", mock.Anything, int64(1)).Return((*authpb.GetUserResponse)(nil), assert.AnError).Once()
+	mockUsers.On("GetByID", mock.Anything, int64(1)).Return((*models.User)(nil), assert.AnError).Once()
 
 	req := httptest.NewRequest(http.MethodGet, "/users/me", bytes.NewReader([]byte{}))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadGateway, rec.Code)
-	mockAuth.AssertExpectations(t)
+	mockUsers.AssertExpectations(t)
 }
 
 func TestGetUserByIDDependencyError(t *testing.T) {
-	mockAuth := new(mocks.MockAuthClient)
-	userSvc := services.NewUserService(mockAuth)
-	handler := NewUserHandler(userSvc, new(mocks.MockFriendRepository))
+	mockUsers := new(mocks.MockUserRepository)
+	userSvc := services.NewUserService(mockUsers)
+	handler := NewUserHandler(userSvc, new(mocks.MockFriendRepository), mockUsers, t.TempDir())
 	router := setupUserRouter(handler)
 
-	mockAuth.On("GetUser", mock.Anything, int64(9)).Return((*authpb.GetUserResponse)(nil), assert.AnError).Once()
+	mockUsers.On("GetByID", mock.Anything, int64(9)).Return((*models.User)(nil), assert.AnError).Once()
 
 	req := httptest.NewRequest(http.MethodGet, "/users/9", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadGateway, rec.Code)
-	mockAuth.AssertExpectations(t)
+	mockUsers.AssertExpectations(t)
+}
+
+func TestUploadAvatar(t *testing.T) {
+	mockUsers := new(mocks.MockUserRepository)
+	userSvc := services.NewUserService(mockUsers)
+	handler := NewUserHandler(userSvc, new(mocks.MockFriendRepository), mockUsers, t.TempDir())
+	router := setupUserRouter(handler)
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("file", "avatar.png")
+	require.NoError(t, err)
+	_, err = io.Copy(part, strings.NewReader("avatar-content"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	mockUsers.On("SetAvatarURL", mock.Anything, int64(1), mock.AnythingOfType("string")).Return(nil).Once()
+
+	req := httptest.NewRequest(http.MethodPost, "/users/me/avatar", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp map[string]string
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	avatarURL := resp["avatar_url"]
+	require.NotEmpty(t, avatarURL)
+
+	relativePath := strings.TrimPrefix(avatarURL, "/uploads/avatars/")
+	_, err = os.Stat(filepath.Join(handler.avatarDir, relativePath))
+	require.NoError(t, err)
+
+	mockUsers.AssertExpectations(t)
+}
+
+func TestDeleteAvatar(t *testing.T) {
+	mockUsers := new(mocks.MockUserRepository)
+	avatarDir := t.TempDir()
+	userSvc := services.NewUserService(mockUsers)
+	handler := NewUserHandler(userSvc, new(mocks.MockFriendRepository), mockUsers, avatarDir)
+	router := setupUserRouter(handler)
+
+	avatarURL := "/uploads/avatars/1/to-delete.png"
+	filePath := filepath.Join(avatarDir, "1", "to-delete.png")
+	require.NoError(t, os.MkdirAll(filepath.Dir(filePath), 0o755))
+	require.NoError(t, os.WriteFile(filePath, []byte("content"), 0o644))
+
+	mockUsers.On("GetAvatarURL", mock.Anything, int64(1)).Return(avatarURL, nil).Once()
+	mockUsers.On("ClearAvatarURL", mock.Anything, int64(1)).Return(nil).Once()
+
+	req := httptest.NewRequest(http.MethodDelete, "/users/me/avatar", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	mockUsers.AssertExpectations(t)
 }
