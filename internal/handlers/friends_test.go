@@ -32,6 +32,7 @@ func setupFriendsRouter(handler *FriendHandler) *gin.Engine {
 	r.POST("/friends/requests/:id/accept", handler.AcceptRequest)
 	r.POST("/friends/requests/:id/reject", handler.RejectRequest)
 	r.GET("/friends", handler.ListFriends)
+	r.DELETE("/friends/:friend_id", handler.DeleteFriend)
 	return r
 }
 
@@ -56,7 +57,7 @@ func expectAuditPublish(t *testing.T, publisher *mocks.MockPublisher, requestID,
 func TestSendRequestInvalidBody(t *testing.T) {
 	mockPublisher := new(mocks.MockPublisher)
 	emitter := telemetry.NewAuditEmitter(mockPublisher, "user-service", "local")
-	handler := NewFriendHandler(new(mocks.MockFriendRepository), services.NewUserService(new(mocks.MockAuthClient)), emitter)
+	handler := NewFriendHandler(new(mocks.MockFriendRepository), services.NewUserService(new(mocks.MockAuthClient), new(mocks.MockUserRepository)), emitter)
 	router := setupFriendsRouter(handler)
 
 	requestID := "req-1"
@@ -75,7 +76,9 @@ func TestSendRequestInvalidBody(t *testing.T) {
 func TestSendRequestTargetNotFound(t *testing.T) {
 	mockAuth := new(mocks.MockAuthClient)
 	mockFriends := new(mocks.MockFriendRepository)
-	userSvc := services.NewUserService(mockAuth)
+	mockUsers := new(mocks.MockUserRepository)
+	mockUsers.On("GetAvatarURL", mock.Anything, mock.Anything).Return("", nil).Maybe()
+	userSvc := services.NewUserService(mockAuth, mockUsers)
 	mockPublisher := new(mocks.MockPublisher)
 	emitter := telemetry.NewAuditEmitter(mockPublisher, "user-service", "local")
 	handler := NewFriendHandler(mockFriends, userSvc, emitter)
@@ -95,12 +98,15 @@ func TestSendRequestTargetNotFound(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, rec.Code)
 	mockAuth.AssertExpectations(t)
 	mockPublisher.AssertExpectations(t)
+	mockUsers.AssertExpectations(t)
 }
 
 func TestSendRequestPendingExists(t *testing.T) {
 	mockAuth := new(mocks.MockAuthClient)
 	mockFriends := new(mocks.MockFriendRepository)
-	userSvc := services.NewUserService(mockAuth)
+	mockUsers := new(mocks.MockUserRepository)
+	mockUsers.On("GetAvatarURL", mock.Anything, mock.Anything).Return("", nil)
+	userSvc := services.NewUserService(mockAuth, mockUsers)
 	mockPublisher := new(mocks.MockPublisher)
 	emitter := telemetry.NewAuditEmitter(mockPublisher, "user-service", "local")
 	handler := NewFriendHandler(mockFriends, userSvc, emitter)
@@ -122,12 +128,15 @@ func TestSendRequestPendingExists(t *testing.T) {
 	mockAuth.AssertExpectations(t)
 	mockFriends.AssertExpectations(t)
 	mockPublisher.AssertExpectations(t)
+	mockUsers.AssertExpectations(t)
 }
 
 func TestSendRequestAlreadyFriends(t *testing.T) {
 	mockAuth := new(mocks.MockAuthClient)
 	mockFriends := new(mocks.MockFriendRepository)
-	userSvc := services.NewUserService(mockAuth)
+	mockUsers := new(mocks.MockUserRepository)
+	mockUsers.On("GetAvatarURL", mock.Anything, mock.Anything).Return("", nil)
+	userSvc := services.NewUserService(mockAuth, mockUsers)
 	mockPublisher := new(mocks.MockPublisher)
 	emitter := telemetry.NewAuditEmitter(mockPublisher, "user-service", "local")
 	handler := NewFriendHandler(mockFriends, userSvc, emitter)
@@ -150,12 +159,15 @@ func TestSendRequestAlreadyFriends(t *testing.T) {
 	mockAuth.AssertExpectations(t)
 	mockFriends.AssertExpectations(t)
 	mockPublisher.AssertExpectations(t)
+	mockUsers.AssertExpectations(t)
 }
 
 func TestSendRequestSuccess(t *testing.T) {
 	mockAuth := new(mocks.MockAuthClient)
 	mockFriends := new(mocks.MockFriendRepository)
-	userSvc := services.NewUserService(mockAuth)
+	mockUsers := new(mocks.MockUserRepository)
+	mockUsers.On("GetAvatarURL", mock.Anything, mock.Anything).Return("", nil)
+	userSvc := services.NewUserService(mockAuth, mockUsers)
 	mockPublisher := new(mocks.MockPublisher)
 	emitter := telemetry.NewAuditEmitter(mockPublisher, "user-service", "local")
 	handler := NewFriendHandler(mockFriends, userSvc, emitter)
@@ -184,10 +196,11 @@ func TestSendRequestSuccess(t *testing.T) {
 	mockAuth.AssertExpectations(t)
 	mockFriends.AssertExpectations(t)
 	mockPublisher.AssertExpectations(t)
+	mockUsers.AssertExpectations(t)
 }
 
 func TestAcceptRequestInvalidID(t *testing.T) {
-	handler := NewFriendHandler(new(mocks.MockFriendRepository), services.NewUserService(new(mocks.MockAuthClient)), nil)
+	handler := NewFriendHandler(new(mocks.MockFriendRepository), services.NewUserService(new(mocks.MockAuthClient), new(mocks.MockUserRepository)), nil)
 	router := setupFriendsRouter(handler)
 
 	req := httptest.NewRequest(http.MethodPost, "/friends/requests/abc/accept", nil)
@@ -201,7 +214,7 @@ func TestAcceptRequestSuccess(t *testing.T) {
 	mockFriends := new(mocks.MockFriendRepository)
 	mockPublisher := new(mocks.MockPublisher)
 	emitter := telemetry.NewAuditEmitter(mockPublisher, "user-service", "local")
-	handler := NewFriendHandler(mockFriends, services.NewUserService(new(mocks.MockAuthClient)), emitter)
+	handler := NewFriendHandler(mockFriends, services.NewUserService(new(mocks.MockAuthClient), new(mocks.MockUserRepository)), emitter)
 	router := setupFriendsRouter(handler)
 
 	mockFriends.On("AcceptRequest", mock.Anything, int64(7), int64(1)).Return(nil).Once()
@@ -220,11 +233,40 @@ func TestAcceptRequestSuccess(t *testing.T) {
 	mockPublisher.AssertExpectations(t)
 }
 
+func TestDeleteFriend(t *testing.T) {
+	mockAuth := new(mocks.MockAuthClient)
+	mockFriends := new(mocks.MockFriendRepository)
+	mockUsers := new(mocks.MockUserRepository)
+	mockUsers.On("GetAvatarURL", mock.Anything, mock.Anything).Return("", nil)
+	userSvc := services.NewUserService(mockAuth, mockUsers)
+	handler := NewFriendHandler(mockFriends, userSvc, nil)
+	router := setupFriendsRouter(handler)
+
+	mockAuth.On("GetUser", mock.Anything, int64(2)).Return(&authpb.GetUserResponse{Id: 2, Username: "bob"}, nil).Twice()
+	mockFriends.On("AreFriends", mock.Anything, int64(1), int64(2)).Return(true, nil).Once()
+	mockFriends.On("DeleteFriendship", mock.Anything, int64(1), int64(2)).Return(nil).Once()
+	mockFriends.On("AreFriends", mock.Anything, int64(1), int64(2)).Return(false, nil).Once()
+
+	req := httptest.NewRequest(http.MethodDelete, "/friends/2", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+
+	req = httptest.NewRequest(http.MethodDelete, "/friends/2", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	require.Contains(t, []int{http.StatusBadRequest, http.StatusNotFound}, rec.Code)
+
+	mockAuth.AssertExpectations(t)
+	mockFriends.AssertExpectations(t)
+	mockUsers.AssertExpectations(t)
+}
+
 func TestRejectRequestSuccess(t *testing.T) {
 	mockFriends := new(mocks.MockFriendRepository)
 	mockPublisher := new(mocks.MockPublisher)
 	emitter := telemetry.NewAuditEmitter(mockPublisher, "user-service", "local")
-	handler := NewFriendHandler(mockFriends, services.NewUserService(new(mocks.MockAuthClient)), emitter)
+	handler := NewFriendHandler(mockFriends, services.NewUserService(new(mocks.MockAuthClient), new(mocks.MockUserRepository)), emitter)
 
 	router := setupFriendsRouter(handler)
 
@@ -247,7 +289,9 @@ func TestRejectRequestSuccess(t *testing.T) {
 func TestListFriendsSuccess(t *testing.T) {
 	mockAuth := new(mocks.MockAuthClient)
 	mockFriends := new(mocks.MockFriendRepository)
-	userSvc := services.NewUserService(mockAuth)
+	mockUsers := new(mocks.MockUserRepository)
+	mockUsers.On("GetAvatarURL", mock.Anything, mock.Anything).Return("", nil)
+	userSvc := services.NewUserService(mockAuth, mockUsers)
 	handler := NewFriendHandler(mockFriends, userSvc, nil)
 	router := setupFriendsRouter(handler)
 
@@ -268,12 +312,15 @@ func TestListFriendsSuccess(t *testing.T) {
 
 	mockAuth.AssertExpectations(t)
 	mockFriends.AssertExpectations(t)
+	mockUsers.AssertExpectations(t)
 }
 
 func TestListIncomingSuccess(t *testing.T) {
 	mockAuth := new(mocks.MockAuthClient)
 	mockFriends := new(mocks.MockFriendRepository)
-	userSvc := services.NewUserService(mockAuth)
+	mockUsers := new(mocks.MockUserRepository)
+	mockUsers.On("GetAvatarURL", mock.Anything, mock.Anything).Return("", nil)
+	userSvc := services.NewUserService(mockAuth, mockUsers)
 	handler := NewFriendHandler(mockFriends, userSvc, nil)
 	router := setupFriendsRouter(handler)
 
@@ -295,13 +342,14 @@ func TestListIncomingSuccess(t *testing.T) {
 
 	mockAuth.AssertExpectations(t)
 	mockFriends.AssertExpectations(t)
+	mockUsers.AssertExpectations(t)
 }
 
 func TestHandleDecisionNotFound(t *testing.T) {
 	mockFriends := new(mocks.MockFriendRepository)
 	mockPublisher := new(mocks.MockPublisher)
 	emitter := telemetry.NewAuditEmitter(mockPublisher, "user-service", "local")
-	handler := NewFriendHandler(mockFriends, services.NewUserService(new(mocks.MockAuthClient)), emitter)
+	handler := NewFriendHandler(mockFriends, services.NewUserService(new(mocks.MockAuthClient), new(mocks.MockUserRepository)), emitter)
 	router := setupFriendsRouter(handler)
 
 	mockFriends.On("AcceptRequest", mock.Anything, int64(15), int64(1)).Return(sql.ErrNoRows).Once()
@@ -324,7 +372,7 @@ func TestRejectRequestNotFound(t *testing.T) {
 	mockFriends := new(mocks.MockFriendRepository)
 	mockPublisher := new(mocks.MockPublisher)
 	emitter := telemetry.NewAuditEmitter(mockPublisher, "user-service", "local")
-	handler := NewFriendHandler(mockFriends, services.NewUserService(new(mocks.MockAuthClient)), emitter)
+	handler := NewFriendHandler(mockFriends, services.NewUserService(new(mocks.MockAuthClient), new(mocks.MockUserRepository)), emitter)
 	router := setupFriendsRouter(handler)
 
 	mockFriends.On("RejectRequest", mock.Anything, int64(18), int64(1)).Return(sql.ErrNoRows).Once()
@@ -347,7 +395,7 @@ func TestHandleDecisionInternalError(t *testing.T) {
 	mockFriends := new(mocks.MockFriendRepository)
 	mockPublisher := new(mocks.MockPublisher)
 	emitter := telemetry.NewAuditEmitter(mockPublisher, "user-service", "local")
-	handler := NewFriendHandler(mockFriends, services.NewUserService(new(mocks.MockAuthClient)), emitter)
+	handler := NewFriendHandler(mockFriends, services.NewUserService(new(mocks.MockAuthClient), new(mocks.MockUserRepository)), emitter)
 	router := setupFriendsRouter(handler)
 
 	mockFriends.On("RejectRequest", mock.Anything, int64(16), int64(1)).Return(errors.New("db down")).Once()

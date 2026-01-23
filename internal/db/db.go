@@ -48,6 +48,7 @@ func runMigrations(db *sqlx.DB) error {
 			friend_id INT NOT NULL,
 			UNIQUE (user_id, friend_id)
 			)`,
+		`ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS avatar_url TEXT`,
 	}
 
 	for _, q := range queries {

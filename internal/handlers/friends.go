@@ -206,6 +206,44 @@ func (h *FriendHandler) ListFriends(c *gin.Context) {
 	c.JSON(nethttp.StatusOK, resp)
 }
 
+func (h *FriendHandler) DeleteFriend(c *gin.Context) {
+	friendIDStr := c.Param("friend_id")
+	friendID, err := strconv.ParseInt(friendIDStr, 10, 64)
+	if err != nil {
+		c.JSON(nethttp.StatusBadRequest, gin.H{"error": "invalid friend id"})
+		return
+	}
+
+	userID := userIDFromContext(c)
+	if userID == nil {
+		c.JSON(nethttp.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	ctx := c.Request.Context()
+	if _, err := h.users.GetUserByID(ctx, friendID); err != nil {
+		c.JSON(nethttp.StatusNotFound, gin.H{"error": "friend not found"})
+		return
+	}
+
+	areFriends, err := h.friends.AreFriends(ctx, *userID, friendID)
+	if err != nil {
+		c.JSON(nethttp.StatusInternalServerError, gin.H{"error": "failed to check friendship"})
+		return
+	}
+	if !areFriends {
+		c.JSON(nethttp.StatusNotFound, gin.H{"error": "friendship not found"})
+		return
+	}
+
+	if err := h.friends.DeleteFriendship(ctx, *userID, friendID); err != nil {
+		c.JSON(nethttp.StatusInternalServerError, gin.H{"error": "failed to delete friendship"})
+		return
+	}
+
+	c.Status(nethttp.StatusNoContent)
+}
+
 func (h *FriendHandler) emitAudit(ctx context.Context, level, text, requestID string, userID *int64) {
 	if h.audit == nil {
 		return

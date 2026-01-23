@@ -86,6 +86,40 @@ func (m *MockFriendRepository) AreFriends(ctx context.Context, userID, otherID i
 	return args.Bool(0), args.Error(1)
 }
 
+func (m *MockFriendRepository) DeleteFriendship(ctx context.Context, userID, friendID int64) error {
+	args := m.Called(ctx, userID, friendID)
+	return args.Error(0)
+}
+
+// MockUserRepository mocks UserRepository behavior for handlers and services.
+type MockUserRepository struct {
+	mock.Mock
+}
+
+func (m *MockUserRepository) GetByID(ctx context.Context, id int64) (*models.User, error) {
+	args := m.Called(ctx, id)
+	var user *models.User
+	if val := args.Get(0); val != nil {
+		user = val.(*models.User)
+	}
+	return user, args.Error(1)
+}
+
+func (m *MockUserRepository) GetAvatarURL(ctx context.Context, id int64) (string, error) {
+	args := m.Called(ctx, id)
+	return args.String(0), args.Error(1)
+}
+
+func (m *MockUserRepository) SetAvatarURL(ctx context.Context, id int64, avatarURL string) error {
+	args := m.Called(ctx, id, avatarURL)
+	return args.Error(0)
+}
+
+func (m *MockUserRepository) ClearAvatarURL(ctx context.Context, id int64) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
 // Compile-time assertions
 var _ interface {
 	GetUser(context.Context, int64) (*authpb.GetUserResponse, error)
@@ -100,7 +134,15 @@ var _ interface {
 	ListFriends(context.Context, int64) ([]int64, error)
 	HasPendingRequest(context.Context, int64, int64) (bool, error)
 	AreFriends(context.Context, int64, int64) (bool, error)
+	DeleteFriendship(context.Context, int64, int64) error
 } = (*MockFriendRepository)(nil)
+
+var _ interface {
+	GetByID(context.Context, int64) (*models.User, error)
+	GetAvatarURL(context.Context, int64) (string, error)
+	SetAvatarURL(context.Context, int64, string) error
+	ClearAvatarURL(context.Context, int64) error
+} = (*MockUserRepository)(nil)
 
 // MockPublisher mocks RabbitMQ publisher behavior for telemetry.
 type MockPublisher struct {

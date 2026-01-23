@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 
+	"user-service/internal/repositories"
 	authpb "user-service/proto/auth"
 )
 
@@ -13,16 +14,18 @@ type AuthClient interface {
 
 type UserService struct {
 	authClient AuthClient
+	users      repositories.UserRepository
 }
 
 type UserDTO struct {
 	ID        int64  `json:"id"`
 	Username  string `json:"username"`
+	AvatarURL string `json:"avatar_url,omitempty"`
 	CreatedAt string `json:"created_at,omitempty"`
 }
 
-func NewUserService(authClient AuthClient) *UserService {
-	return &UserService{authClient: authClient}
+func NewUserService(authClient AuthClient, users repositories.UserRepository) *UserService {
+	return &UserService{authClient: authClient, users: users}
 }
 
 func (s *UserService) GetUserByID(ctx context.Context, id int64) (*UserDTO, error) {
@@ -30,5 +33,17 @@ func (s *UserService) GetUserByID(ctx context.Context, id int64) (*UserDTO, erro
 	if err != nil {
 		return nil, err
 	}
-	return &UserDTO{ID: user.Id, Username: user.Username, CreatedAt: user.CreatedAt}, nil
+	avatarURL := ""
+	if s.users != nil {
+		avatarURL, err = s.users.GetAvatarURL(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &UserDTO{
+		ID:        user.Id,
+		Username:  user.Username,
+		AvatarURL: avatarURL,
+		CreatedAt: user.CreatedAt,
+	}, nil
 }

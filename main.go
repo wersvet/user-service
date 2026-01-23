@@ -81,10 +81,11 @@ func main() {
 	defer auditPublisher.Close()
 
 	friendRepo := repositories.NewFriendRepository(database, publisher)
-	userService := services.NewUserService(authClient)
+	userRepo := repositories.NewUserRepository(database)
+	userService := services.NewUserService(authClient, userRepo)
 
 	auditEmitter := telemetry.NewAuditEmitter(auditPublisher, serviceName, environment)
-	userHandler := handlers.NewUserHandler(userService, friendRepo)
+	userHandler := handlers.NewUserHandler(userService, friendRepo, userRepo, "uploads/avatars")
 	friendHandler := handlers.NewFriendHandler(friendRepo, userService, auditEmitter)
 
 	if _, err := grpcsvc.StartGRPCServer(ctx, ":8085", friendRepo, authClient); err != nil {
@@ -98,14 +99,18 @@ func main() {
 
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	r.GET("/users/:id", userHandler.GetUserByID)
+	r.Static("/uploads/avatars", "./uploads/avatars")
 
 	auth := r.Group("", middleware.JWTAuth(jwtSecret))
 	auth.GET("/users/me", userHandler.GetMe)
+	auth.POST("/users/me/avatar", userHandler.UploadAvatar)
+	auth.DELETE("/users/me/avatar", userHandler.DeleteAvatar)
 	auth.POST("/friends/request", friendHandler.SendRequest)
 	auth.GET("/friends/requests/incoming", friendHandler.ListIncoming)
 	auth.POST("/friends/requests/:id/accept", friendHandler.AcceptRequest)
 	auth.POST("/friends/requests/:id/reject", friendHandler.RejectRequest)
 	auth.GET("/friends", friendHandler.ListFriends)
+	auth.DELETE("/friends/:friend_id", friendHandler.DeleteFriend)
 
 	srv := &http.Server{
 		Addr:    ":" + port,
