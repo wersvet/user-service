@@ -82,7 +82,7 @@ func main() {
 
 	friendRepo := repositories.NewFriendRepository(database, publisher)
 	userRepo := repositories.NewUserRepository(database)
-	userService := services.NewUserService(authClient, userRepo)
+	userService := services.NewUserService(userRepo)
 
 	auditEmitter := telemetry.NewAuditEmitter(auditPublisher, serviceName, environment)
 	userHandler := handlers.NewUserHandler(userService, friendRepo, userRepo, "uploads/avatars")

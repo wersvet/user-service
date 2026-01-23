@@ -2,19 +2,13 @@ package services
 
 import (
 	"context"
+	"log"
 
 	"user-service/internal/repositories"
-	authpb "user-service/proto/auth"
 )
 
-// AuthClient describes the subset of the auth gRPC client used by the service.
-type AuthClient interface {
-	GetUser(ctx context.Context, userID int64) (*authpb.GetUserResponse, error)
-}
-
 type UserService struct {
-	authClient AuthClient
-	users      repositories.UserRepository
+	users repositories.UserRepository
 }
 
 type UserDTO struct {
@@ -24,26 +18,19 @@ type UserDTO struct {
 	CreatedAt string `json:"created_at,omitempty"`
 }
 
-func NewUserService(authClient AuthClient, users repositories.UserRepository) *UserService {
-	return &UserService{authClient: authClient, users: users}
+func NewUserService(users repositories.UserRepository) *UserService {
+	return &UserService{users: users}
 }
 
 func (s *UserService) GetUserByID(ctx context.Context, id int64) (*UserDTO, error) {
-	user, err := s.authClient.GetUser(ctx, id)
+	user, err := s.users.GetByID(ctx, id)
 	if err != nil {
+		log.Printf("debug: failed to load user %d: %v", id, err)
 		return nil, err
 	}
-	avatarURL := ""
-	if s.users != nil {
-		avatarURL, err = s.users.GetAvatarURL(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-	}
 	return &UserDTO{
-		ID:        user.Id,
+		ID:        user.ID,
 		Username:  user.Username,
-		AvatarURL: avatarURL,
-		CreatedAt: user.CreatedAt,
+		AvatarURL: user.AvatarURL,
 	}, nil
 }

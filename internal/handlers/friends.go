@@ -56,6 +56,12 @@ func (h *FriendHandler) SendRequest(c *gin.Context) {
 
 	ctx := c.Request.Context()
 	if _, err := h.users.GetUserByID(ctx, toUserID); err != nil {
+		if err == sql.ErrNoRows {
+			h.emitAudit(ctx, "ERROR", "target user not found", requestID, userID)
+			metrics.IncFriendRequest(metrics.StatusFailed)
+			c.JSON(nethttp.StatusNotFound, gin.H{"error": "target user not found"})
+			return
+		}
 		h.emitAudit(ctx, "ERROR", "target user not found", requestID, userID)
 		metrics.IncFriendRequest(metrics.StatusFailed)
 		c.JSON(nethttp.StatusNotFound, gin.H{"error": "target user not found"})
@@ -116,6 +122,10 @@ func (h *FriendHandler) ListIncoming(c *gin.Context) {
 	for _, req := range requests {
 		sender, err := h.users.GetUserByID(c.Request.Context(), req.FromUserID)
 		if err != nil {
+			if err == sql.ErrNoRows {
+				c.JSON(nethttp.StatusNotFound, gin.H{"error": "requester not found"})
+				return
+			}
 			c.JSON(nethttp.StatusBadGateway, gin.H{"error": "failed to fetch requester info"})
 			return
 		}
@@ -197,6 +207,10 @@ func (h *FriendHandler) ListFriends(c *gin.Context) {
 	for _, fid := range friends {
 		friendUser, err := h.users.GetUserByID(c.Request.Context(), fid)
 		if err != nil {
+			if err == sql.ErrNoRows {
+				c.JSON(nethttp.StatusNotFound, gin.H{"error": "friend not found"})
+				return
+			}
 			c.JSON(nethttp.StatusBadGateway, gin.H{"error": "failed to fetch friend info"})
 			return
 		}
@@ -222,6 +236,10 @@ func (h *FriendHandler) DeleteFriend(c *gin.Context) {
 
 	ctx := c.Request.Context()
 	if _, err := h.users.GetUserByID(ctx, friendID); err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(nethttp.StatusNotFound, gin.H{"error": "friend not found"})
+			return
+		}
 		c.JSON(nethttp.StatusNotFound, gin.H{"error": "friend not found"})
 		return
 	}

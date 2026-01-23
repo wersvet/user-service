@@ -40,6 +40,10 @@ func (h *UserHandler) GetMe(c *gin.Context) {
 	ctx := c.Request.Context()
 	user, err := h.userService.GetUserByID(ctx, userID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(nethttp.StatusNotFound, gin.H{"error": "user not found"})
+			return
+		}
 		c.JSON(nethttp.StatusBadGateway, gin.H{"error": "failed to fetch user"})
 		return
 	}
@@ -60,6 +64,10 @@ func (h *UserHandler) GetMe(c *gin.Context) {
 	for _, fid := range friends {
 		fUser, err := h.userService.GetUserByID(ctx, fid)
 		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				c.JSON(nethttp.StatusNotFound, gin.H{"error": "friend not found"})
+				return
+			}
 			c.JSON(nethttp.StatusBadGateway, gin.H{"error": "failed to fetch friend info"})
 			return
 		}
@@ -70,6 +78,10 @@ func (h *UserHandler) GetMe(c *gin.Context) {
 	for _, req := range incoming {
 		sender, err := h.userService.GetUserByID(ctx, req.FromUserID)
 		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				c.JSON(nethttp.StatusNotFound, gin.H{"error": "requester not found"})
+				return
+			}
 			c.JSON(nethttp.StatusBadGateway, gin.H{"error": "failed to fetch requester info"})
 			return
 		}
@@ -101,6 +113,10 @@ func (h *UserHandler) GetUserByID(c *gin.Context) {
 
 	user, err := h.userService.GetUserByID(c.Request.Context(), id)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(nethttp.StatusNotFound, gin.H{"error": "user not found"})
+			return
+		}
 		c.JSON(nethttp.StatusBadGateway, gin.H{"error": "user not found"})
 		return
 	}
